@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Echo Protocol — Чип-режим</title>
+    <style>
+        body {
+            margin: 0;
+            background: #0a0a10;
+            color: #fff;
+            font-family: monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        canvas {
+            border: 2px solid #00ffcc;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.3);
+            background: #11111b;
+            cursor: crosshair;
+        }
+        .ui { margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+<div class="ui">
+    <b>Управление:</b> WASD — Бегать | Зажми ЛКМ — Стрелять
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let player = { x: 400, y: 300, radius: 15, speed: 6, health: 200 };
+let keys = {};
+let mousePos = { x: 0, y: 0 };
+let isMouseDown = false;
+let bullets = [];
+let enemies = [];
+let particles = [];
+let score = 0;
+let gameOver = false;
+let shootTimer = 0;
+let spawnTimer = 0;
+
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    mousePos.x = e.clientX - rect.left;
+    mousePos.y = e.clientY - rect.top;
+});
+canvas.addEventListener('mousedown', e => { if (e.button === 0) isMouseDown = true; });
+canvas.addEventListener('mouseup', e => { if (e.button === 0) isMouseDown = false; });
+
+function shoot() {
+    const angle = Math.atan2(mousePos.y - player.y, mousePos.x - player.x);
+    bullets.push({
+        x: player.x,
+        y: player.y,
+        vx: Math.cos(angle) * 12,
+        vy: Math.sin(angle) * 12
+    });
+}
+
+function spawnEnemy() {
+    let x = Math.random() < 0.5 ? -20 : canvas.width + 20;
+    let y = Math.random() * canvas.height;
+    // Очень медленные враги (скорость 0.6)
+    enemies.push({ x, y, radius: 12, speed: 0.6 });
+}
+
+function createExplosion(x, y) {
+    for (let i = 0; i < 8; i++) {
+        particles.push({
+            x, y,
+            vx: (Math.random() - 0.5) * 4,
+            vy: (Math.random() - 0.5) * 4,
+            life: 15
+        });
+    }
+}
+
+function update() {
+    if (gameOver) return;
+
+    if (keys['KeyW'] && player.y > player.radius) player.y -= player.speed;
+    if (keys['KeyS'] && player.y < canvas.height - player.radius) player.y += player.speed;
+    if (keys['KeyA'] && player.x > player.radius) player.x -= player.speed;
+    if (keys['KeyD'] && player.x < canvas.width - player.radius) player.x += player.speed;
+
+    if (isMouseDown) {
+        shootTimer++;
+        if (shootTimer % 6 === 0) shoot();
+    }
+
+    spawnTimer++;
+    // Спавн раз в ~1.5 секунды (90 кадров) вместо частой волны
+    if (spawnTimer > 90) {
+        spawnEnemy();
+        spawnTimer = 0;
+    }
+
+    bullets.forEach((b, i) => {
+        b.x += b.vx;
+        b.y += b.vy;
+        if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
+            bullets.splice(i, 1);
+        }
+    });
+
+    enemies.forEach((e, ei) => {
+        const angle = Math.atan2(player.y - e.y, player.x - e.x);
+        e.x += Math.cos(angle) * e.speed;
+        e.y += Math.sin(angle) * e.speed;
+
+        if (Math.hypot(player.x - e.x, player.y - e.y) < player.radius + e.radius) {
+            player.health -= 10;
+            createExplosion(e.x, e.y);
+            enemies.splice(ei, 1);
+            if (player.health <= 0) gameOver = true;
+        }
+
+        bullets.forEach((b, bi) => {
+            if (Math.hypot(b.x - e.x, b.y - e.y) < e.radius + 6) {
+                createExplosion(e.x, e.y);
+                enemies.splice(ei, 1);
+                bullets.splice(bi, 1);
+                score += 50;
+            }
+        });
+    });
+
+    particles.forEach((p, i) => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+        if (p.life <= 0) particles.splice(i, 1);
+    });
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (gameOver) {
+        ctx.fillStyle = '#ff4444';
+        ctx.font = '30px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('КОНЕЦ ИГРЫ', canvas.width / 2, canvas.height / 2);
+        ctx.fillText(`Счет: ${score}`, canvas.width / 2, canvas.height / 2 + 40);
+        return;
+    }
+
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.rotate(Math.atan2(mousePos.y - player.y, mousePos.x - player.x));
+    ctx.fillStyle = '#00ffcc';
+    ctx.beginPath(); ctx.arc(0, 0, player.radius, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(0, -3, player.radius + 8, 6);
+    ctx.restore();
+
+    ctx.fillStyle = '#ffff00';
+    bullets.forEach(b => { ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill(); });
+
+    ctx.fillStyle = '#ff4444';
+    enemies.forEach(e => { ctx.beginPath(); ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2); ctx.fill(); });
+
+    ctx.fillStyle = '#00ffcc';
+    particles.forEach(p => ctx.fillRect(p.x, p.y, 3, 3));
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '16px monospace';
+    ctx.fillText(`Здоровье: ${player.health}`, 20, 30);
+    ctx.fillText(`Счет: ${score}`, 20, 55);
+}
+
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
